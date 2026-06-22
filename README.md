@@ -159,11 +159,27 @@ curl -s http://localhost:4433/sessions/whoami \
 
 Your backend should call `/sessions/whoami` on every request to validate the token passed by the client. If `active` is `false` or the call returns `401`, the session has expired and the user must re-authenticate.
 
-## Admin: List All Identities
+## Admin: Identities
 
+### List all identities
 ```bash
 curl -s http://localhost:4434/admin/identities | python3 -m json.tool
 ```
+
+### Look up identity by email
+```bash
+curl -s "http://localhost:4434/admin/identities?credentials_identifier=you@example.com" | python3 -m json.tool
+```
+
+This is an indexed lookup — Kratos queries directly by the credential identifier, not a full table scan. Safe to use in production with millions of identities.
+
+### Extract just the identity ID
+```bash
+curl -s "http://localhost:4434/admin/identities?credentials_identifier=you@example.com" | \
+  python3 -c "import sys,json; d=json.load(sys.stdin); print(d[0]['id'] if d else 'not found')"
+```
+
+> **Note:** Identity lookup is admin-only (`localhost:4434`). The public API has no email lookup endpoint by design — exposing one would be a data leak. Never expose port 4434 outside your backend.
 
 ## Stop & Clean
 
