@@ -1,0 +1,131 @@
+version: v0.13.0
+
+# ── DSN ──────────────────────────────────────────────────────────────────────
+# SQLite for local POC. For prod (CockroachDB): cockroach://user:pass@host/db?sslmode=verify-full
+dsn: sqlite:///var/lib/kratos/db.sqlite?_fk=true&mode=rwc
+
+# ── Server URLs ───────────────────────────────────────────────────────────────
+serve:
+  public:
+    base_url: http://localhost:4433/
+    cors:
+      enabled: true
+      allowed_origins:
+        - http://localhost:3000
+      allowed_methods:
+        - POST
+        - GET
+        - PUT
+        - PATCH
+        - DELETE
+      allowed_headers:
+        - Authorization
+        - Cookie
+        - Content-Type
+      exposed_headers:
+        - Content-Type
+        - Set-Cookie
+      allow_credentials: true
+  admin:
+    base_url: http://localhost:4434/
+
+# ── Selfservice ───────────────────────────────────────────────────────────────
+selfservice:
+  default_browser_return_url: http://localhost:3000/
+  allowed_return_urls:
+    - http://localhost:3000
+
+  methods:
+    code:
+      enabled: true
+      passwordless_enabled: true   # Pure OTP, no password ever needed
+      config:
+        lifespan: 15m              # OTP expires in 15 minutes
+
+    password:
+      enabled: false
+
+    oidc:
+      enabled: false
+
+    totp:
+      enabled: false
+
+    webauthn:
+      enabled: false
+
+    lookup_secret:
+      enabled: false
+
+  flows:
+    registration:
+      lifespan: 10m
+      ui_url: http://localhost:3000/registration
+      after:
+        code:
+          hooks:
+            - hook: session          # Create session immediately after OTP verified
+
+    login:
+      lifespan: 10m
+      ui_url: http://localhost:3000/login
+      after:
+        code:
+          hooks: []
+
+    verification:
+      enabled: true
+      lifespan: 1h
+      ui_url: http://localhost:3000/verification
+      use: code
+      after:
+        default_browser_return_url: http://localhost:3000/dashboard
+
+    recovery:
+      enabled: true
+      lifespan: 1h
+      ui_url: http://localhost:3000/recovery
+      use: code
+
+    error:
+      ui_url: http://localhost:3000/error
+
+    logout:
+      after:
+        default_browser_return_url: http://localhost:3000/login
+
+# ── Session ───────────────────────────────────────────────────────────────────
+session:
+  lifespan: 24h
+  cookie:
+    domain: localhost
+    same_site: Lax
+
+# ── Identity Schemas ──────────────────────────────────────────────────────────
+identity:
+  default_schema_id: default
+  schemas:
+    - id: default
+      url: file:///etc/config/kratos/identity.schema.json
+
+# ── Courier (Email Delivery) ──────────────────────────────────────────────────
+courier:
+  smtp:
+    connection_uri: smtps://test:test@mailslurper:1025/?skip_ssl_verify=true&legacy_ssl=true
+    from_address: noreply@poc.local
+    from_name: "Kratos OTP POC"
+
+# ── Secrets ───────────────────────────────────────────────────────────────────
+secrets:
+  cookie:
+    - poc-cookie-secret-change-in-prod-1    # HMAC for session cookie signing
+  cipher:
+    - poc-cipher-key-32chars-123456789   # 32-byte AES for DB field encryption
+  default:
+    - poc-default-secret-change-in-prod
+
+# ── Log ───────────────────────────────────────────────────────────────────────
+log:
+  level: debug
+  format: text
+  leak_sensitive_values: true    # POC only — NEVER in prod

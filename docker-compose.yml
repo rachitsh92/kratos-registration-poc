@@ -1,0 +1,52 @@
+version: "3.7"
+
+services:
+
+  # ── Step 1: Run DB migrations before Kratos starts ──────────────────────────
+  kratos-migrate:
+    image: oryd/kratos:v1.2.0
+    environment:
+      - DSN=sqlite:///var/lib/kratos/db.sqlite?_fk=true&mode=rwc
+    volumes:
+      - ./kratos-data:/var/lib/kratos
+      - ./kratos:/etc/config/kratos
+    command: migrate sql -e --yes
+    restart: on-failure
+    networks:
+      - kratos-net
+
+  # ── Step 2: Kratos identity server ──────────────────────────────────────────
+  kratos:
+    image: oryd/kratos:v1.2.0
+    depends_on:
+      - kratos-migrate
+      - mailslurper
+    ports:
+      - "4433:4433"    # Public API  → your app calls this
+      - "4434:4434"    # Admin API   → internal use only
+    environment:
+      - DSN=sqlite:///var/lib/kratos/db.sqlite?_fk=true&mode=rwc
+      - LOG_LEVEL=debug
+    volumes:
+      - ./kratos-data:/var/lib/kratos
+      - ./kratos:/etc/config/kratos
+    command: serve -c /etc/config/kratos/kratos.yml --dev --watch-courier
+    restart: unless-stopped
+    networks:
+      - kratos-net
+
+  # ── Step 3: Local SMTP catcher (see emails at localhost:4436) ────────────────
+  mailslurper:
+    image: oryd/mailslurper:latest-smtps
+    platform: linux/amd64
+    ports:
+      - "4436:4436"    # MailSlurper Web UI  → open this in browser
+      - "4437:4437"    # MailSlurper API
+      - "1025:1025"    # SMTP port Kratos courier connects to
+    networks:
+      - kratos-net
+
+networks:
+  kratos-net:
+    driver: bridge
+
