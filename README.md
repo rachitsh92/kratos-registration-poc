@@ -30,36 +30,139 @@ curl http://localhost:4433/health/ready
 ## Run the Test Flow
 
 ```bash
+# defaults: John Doe, Acme Inc
 ./test_flow.sh testuser@poc.local
+
+# custom name and company
+./test_flow.sh you@example.com "Jane" "Smith" "Globex Corp"
 ```
 
 The script will:
 1. Initialize a registration flow
-2. Submit the email → Kratos sends OTP via MailSlurper
+2. Submit email, name, and company → Kratos sends OTP via MailSlurper
 3. Prompt you to open MailSlurper (http://localhost:4436) and enter the code
 4. Complete registration and print the created identity + session token
+5. Automatically call `/sessions/whoami` to verify the session
 
 ## Manual curl Flow
 
 ### 1. Init flow
 ```bash
-curl -s http://localhost:4433/self-service/registration/api | jq .id
+FLOW_ID=$(curl -s http://localhost:4433/self-service/registration/api | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
 ```
 
-### 2. Submit email
+### 2. Submit traits (triggers OTP email)
 ```bash
 curl -s -X POST \
-  "http://localhost:4433/self-service/registration?flow=<FLOW_ID>" \
+  "http://localhost:4433/self-service/registration?flow=${FLOW_ID}" \
   -H 'Content-Type: application/json' \
-  -d '{"method":"code","traits":{"email":"you@example.com"}}'
+  -d '{
+    "method": "code",
+    "traits": {
+      "email": "you@example.com",
+      "name": { "first": "Jane", "last": "Smith" },
+      "company": "Globex Corp"
+    }
+  }'
 ```
 
-### 3. Submit OTP
+### 3. Submit OTP (completes registration)
 ```bash
 curl -s -X POST \
-  "http://localhost:4433/self-service/registration?flow=<FLOW_ID>" \
+  "http://localhost:4433/self-service/registration?flow=${FLOW_ID}" \
   -H 'Content-Type: application/json' \
-  -d '{"method":"code","code":"<OTP>","traits":{"email":"you@example.com"}}'
+  -d '{
+    "method": "code",
+    "code": "<OTP_FROM_MAILSLURPER>",
+    "traits": {
+      "email": "you@example.com",
+      "name": { "first": "Jane", "last": "Smith" },
+      "company": "Globex Corp"
+    }
+  }'
+```
+
+The response contains the created identity and a `session_token`:
+
+```json
+{
+  "session_token": "ory_st_...",
+  "identity": {
+    "id": "...",
+    "traits": {
+      "email": "you@example.com",
+      "name": { "first": "Jane", "last": "Smith" },
+      "company": "Globex Corp"
+    }
+  }
+}
+```
+
+## Session / Whoami
+
+After registration (or login), Kratos returns a `session_token`. Use it to verify the session and fetch the authenticated identity.
+
+### Endpoint
+
+```
+GET /sessions/whoami
+Authorization: Bearer <session_token>
+```
+
+### curl
+
+```bash
+curl -s http://localhost:4433/sessions/whoami \
+  -H "Authorization: Bearer <session_token>" | python3 -m json.tool
+```
+
+### Example response
+
+```json
+{
+  "id": "<session_id>",
+  "active": true,
+  "expires_at": "2026-06-23T10:25:39Z",
+  "authenticated_at": "2026-06-22T10:25:39Z",
+  "authenticator_assurance_level": "aal1",
+  "authentication_methods": [
+    {
+      "method": "code",
+      "aal": "aal1",
+      "completed_at": "2026-06-22T10:25:39Z"
+    }
+  ],
+  "identity": {
+    "id": "<identity_id>",
+    "traits": {
+      "email": "you@example.com",
+      "name": { "first": "Jane", "last": "Smith" },
+      "company": "Globex Corp"
+    },
+    "created_at": "2026-06-22T10:25:39Z",
+    "updated_at": "2026-06-22T10:25:39Z"
+  }
+}
+```
+
+### Key fields
+
+| Field | Description |
+|-------|-------------|
+| `active` | `true` if the session is valid and not expired |
+| `expires_at` | When the session expires (default: 24h after creation) |
+| `authenticated_at` | When the OTP was verified |
+| `authenticator_assurance_level` | `aal1` = single factor (OTP). `aal2` = MFA |
+| `identity.traits` | The user's email, name, and company |
+
+### Usage in your app
+
+Your backend should call `/sessions/whoami` on every request to validate the token passed by the client. If `active` is `false` or the call returns `401`, the session has expired and the user must re-authenticate.
+
+## Admin: List All Identities
+
+```bash
+curl -s http://localhost:4434/admin/identities | python3 -m json.tool
 ```
 
 ## Stop & Clean
@@ -68,7 +171,7 @@ curl -s -X POST \
 docker compose down -v   # -v removes the SQLite volume (resets all identities)
 ```
 
-## Prod Checklist (before using at IDFC)
+## Prod Checklist
 - [ ] Replace SQLite DSN with CockroachDB DSN
 - [ ] Replace `secrets.*` values with K8s secrets / Vault references
 - [ ] Set `courier.smtp.connection_uri` to SES/CCG SMTP relay

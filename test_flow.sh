@@ -80,29 +80,51 @@ RESULT=$(curl -s -X POST \
     }
   }")
 
-echo "$RESULT" | python3 -c "
+SESSION_TOKEN=$(echo "$RESULT" | python3 -c "
 import sys, json
 r = json.load(sys.stdin)
 if 'identity' in r:
     identity = r['identity']
     traits = identity['traits']
     name = traits.get('name', {})
-    print('  ✅ Registration successful!')
-    print('  Identity ID :', identity['id'])
-    print('  Email       :', traits.get('email'))
-    print('  Name        :', name.get('first',''), name.get('last',''))
-    print('  Company     :', traits.get('company',''))
-    print('  Created At  :', identity['created_at'])
+    print('  ✅ Registration successful!', file=sys.stderr)
+    print('  Identity ID :', identity['id'], file=sys.stderr)
+    print('  Email       :', traits.get('email'), file=sys.stderr)
+    print('  Name        :', name.get('first',''), name.get('last',''), file=sys.stderr)
+    print('  Company     :', traits.get('company',''), file=sys.stderr)
+    print('  Created At  :', identity['created_at'], file=sys.stderr)
     if 'session_token' in r:
-        print('  Session Token:', r['session_token'][:40] + '...')
+        print('  Session Token:', r['session_token'][:40] + '...', file=sys.stderr)
+        print(r['session_token'])
 elif 'error' in r:
-    print('  ❌ Error:', r['error'].get('message', 'unknown'))
+    print('  ❌ Error:', r['error'].get('message', 'unknown'), file=sys.stderr)
 else:
     msgs = r.get('ui', {}).get('messages', [])
     for m in msgs:
-        print('  ⚠', m.get('text',''))
-    print(json.dumps(r, indent=2))
+        print('  ⚠', m.get('text',''), file=sys.stderr)
+    print(json.dumps(r, indent=2), file=sys.stderr)
+")
+
+# ── Step 5: Whoami ────────────────────────────────────────────────
+if [ -n "$SESSION_TOKEN" ]; then
+  echo ""
+  echo "▶ Step 4: Verifying session (whoami)..."
+  curl -s "${KRATOS_PUBLIC}/sessions/whoami" \
+    -H "Authorization: Bearer ${SESSION_TOKEN}" | python3 -c "
+import sys, json
+r = json.load(sys.stdin)
+identity = r.get('identity', {})
+traits = identity.get('traits', {})
+name = traits.get('name', {})
+print('  ✓ Session active     :', r.get('active'))
+print('  ✓ Session ID         :', r.get('id'))
+print('  ✓ Identity ID        :', identity.get('id'))
+print('  ✓ Email              :', traits.get('email'))
+print('  ✓ Name               :', name.get('first',''), name.get('last',''))
+print('  ✓ Company            :', traits.get('company',''))
+print('  ✓ Expires At         :', r.get('expires_at'))
 "
+fi
 
 echo ""
 echo "═══════════════════════════════════════════════════════════"
